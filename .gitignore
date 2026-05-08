@@ -1,0 +1,37 @@
+# Android / Gradle / IDE
+*.iml
+.gradle/
+/local.properties
+local.properties
+/.idea/
+.DS_Store
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+/.kotlin/
+/app/.cxx/
+
+# Build outputs
+*.apk
+*.aab
+
+# 大文件 / 临时素材, 不要进 git ----------------------------------
+
+# 仓库根目录拿来手测的 TXT 小说样本(一念永恒、斗破苍穹等)
+/*.txt
+
+# 第三方 SDK 原始压缩包(讯飞 AIKit XTTS 等)
+/*.zip
+/*.tar
+/*.tar.bz2
+/*.tar.gz
+
+# 解压 / 临时目录
+/.sdk-tmp/
+
+# 本地 AAR: 默认全部 ignore (体积大), 然后白名单放出真正需要进仓库的
+/app/libs/*.aar
+# 讯飞 AIKit 离线 TTS SDK (7.1M) — 离线引擎必需, 必须入库
+!/app/libs/AIKit.aar

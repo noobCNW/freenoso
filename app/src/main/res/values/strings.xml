@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">小说阅读</string>
+    <string name="nav_shelf">书架</string>
+    <string name="nav_bookmarks">书签</string>
+    <string name="nav_settings">设置</string>
+    <string name="import_book">导入书籍</string>
+    <string name="empty_shelf">书架空空如也，点击右下角导入第一本书</string>
+    <string name="empty_bookmarks">还没有书签，在阅读时长按或点击书签按钮添加</string>
+
+    <string name="settings_theme">阅读主题</string>
+    <string name="settings_font">字体</string>
+    <string name="settings_tts">朗读引擎</string>
+    <string name="settings_about">关于</string>
+
+    <string name="reader_back">返回</string>
+    <string name="reader_toc">目录</string>
+    <string name="reader_bookmark">添加书签</string>
+    <string name="reader_tts">朗读</string>
+    <string name="reader_settings">设置</string>
+
+    <string name="tts_notification_channel">朗读播放</string>
+
+    <string name="action_delete">删除</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_confirm">确定</string>
+    <string name="action_save">保存</string>
+</resources>
