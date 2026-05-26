@@ -94,6 +94,24 @@ fun ReaderSettingsSheet(
                 }
             }
 
+            Column {
+                Text(
+                    "自动阅读速度  ${prefs.autoReadSpeed.toInt()} / 10",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "横向模式下控制翻页节奏,上下模式下控制滚动快慢,数值越大越快",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+            Slider(
+                value = prefs.autoReadSpeed,
+                onValueChange = { vm.setAutoReadSpeed(it) },
+                valueRange = 1f..10f,
+                steps = 8
+            )
+
             Text("字体", style = MaterialTheme.typography.titleSmall)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

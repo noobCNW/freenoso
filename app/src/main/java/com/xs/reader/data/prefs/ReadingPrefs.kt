@@ -35,6 +35,12 @@ data class ReadingPrefs(
     /** 是否在每章首页正文上方显示章节标题(大字)。 */
     val showChapterTitle: Boolean = false,
     /**
+     * 自动阅读速度,1~10 之间的归一化数值,值越大越快。
+     * - 横向翻页模式:间隔时长 = 14s / speed * 0.7,即速度 5 时约 4s/页,速度 10 约 2s/页。
+     * - 滚动模式:像素/秒 = 24 * speed,即速度 5 ≈ 120 px/s,速度 10 ≈ 240 px/s。
+     */
+    val autoReadSpeed: Float = 5f,
+    /**
      * 用户为讯飞 (普通版/超拟人) 自行添加的发音人预设, 序列化为 JSON 串。
      * 由 `XunfeiVoicePreset.listToJson` / `listFromJson` 解析。
      * 离线/系统 TTS 不走这里, 它们音色固定。
@@ -63,6 +69,7 @@ class ReadingPrefsRepository @Inject constructor(
         val TTS_ACTIVE_ENGINE = stringPreferencesKey("tts_engine_id")
         val TTS_ACTIVE_VOICE = stringPreferencesKey("tts_voice_id")
         val SHOW_CHAPTER_TITLE = booleanPreferencesKey("show_chapter_title")
+        val AUTO_READ_SPEED = floatPreferencesKey("auto_read_speed")
         val XUNFEI_VOICE_PRESETS = stringPreferencesKey("xunfei_voice_presets_json")
     }
 
@@ -85,6 +92,7 @@ class ReadingPrefsRepository @Inject constructor(
         ttsActiveEngineId = p[Keys.TTS_ACTIVE_ENGINE] ?: "system",
         ttsActiveVoiceId = p[Keys.TTS_ACTIVE_VOICE],
         showChapterTitle = p[Keys.SHOW_CHAPTER_TITLE] ?: false,
+        autoReadSpeed = (p[Keys.AUTO_READ_SPEED] ?: 5f).coerceIn(1f, 10f),
         xunfeiVoicePresetsJson = p[Keys.XUNFEI_VOICE_PRESETS]
     )
 
@@ -108,6 +116,9 @@ class ReadingPrefsRepository @Inject constructor(
         if (id == null) it.remove(Keys.TTS_ACTIVE_VOICE) else it[Keys.TTS_ACTIVE_VOICE] = id
     }
     suspend fun setShowChapterTitle(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_CHAPTER_TITLE] = v }
+    suspend fun setAutoReadSpeed(v: Float) = context.dataStore.edit {
+        it[Keys.AUTO_READ_SPEED] = v.coerceIn(1f, 10f)
+    }
     suspend fun setXunfeiVoicePresetsJson(json: String?) = context.dataStore.edit {
         if (json.isNullOrBlank()) it.remove(Keys.XUNFEI_VOICE_PRESETS) else it[Keys.XUNFEI_VOICE_PRESETS] = json
     }

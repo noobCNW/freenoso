@@ -76,6 +76,9 @@ class ReaderViewModel @Inject constructor(
 
     val ttsState: StateFlow<TtsState> = ttsController.state
 
+    private val _autoReading = MutableStateFlow(false)
+    val autoReading: StateFlow<Boolean> = _autoReading.asStateFlow()
+
     private val progressTrigger = MutableStateFlow(0L)
     private var currentBookId: Long = -1L
 
@@ -238,6 +241,25 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch { bookmarkRepo.delete(b) }
     }
 
+    fun toggleAutoReading() {
+        if (_autoReading.value) {
+            _autoReading.value = false
+            return
+        }
+        if (isPdf()) {
+            _state.update { it.copy(error = "PDF 暂不支持自动阅读") }
+            return
+        }
+        if (ttsState.value.isPlaying) {
+            ttsController.stop()
+        }
+        _autoReading.value = true
+    }
+
+    fun stopAutoReading() {
+        if (_autoReading.value) _autoReading.value = false
+    }
+
     fun toggleTts() {
         val s = _state.value
         val book = s.book ?: return
@@ -250,6 +272,7 @@ class ReaderViewModel @Inject constructor(
             ttsController.stop()
             return
         }
+        if (_autoReading.value) _autoReading.value = false
         viewModelScope.launch {
             val p = prefs.value
             val engine = ttsRegistry.byId(p.ttsActiveEngineId)

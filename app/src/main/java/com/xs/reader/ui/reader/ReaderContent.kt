@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -45,6 +46,7 @@ fun ReaderContent(
 ) {
     val prefs by vm.prefs.collectAsState()
     val ttsState by vm.ttsState.collectAsState()
+    val autoReading by vm.autoReading.collectAsState()
     val theme = ReaderThemes.byId(prefs.themeId)
     var showOverlay by rememberSaveable { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
@@ -86,6 +88,7 @@ fun ReaderContent(
             prefs = prefs,
             theme = theme,
             ttsPlaying = ttsState.isPlaying,
+            autoReading = autoReading,
             showOverlay = showOverlay,
             onToggleOverlay = { showOverlay = !showOverlay },
             onBack = onBack,
@@ -93,6 +96,7 @@ fun ReaderContent(
             onOpenSettings = { showSettings = true; showOverlay = false },
             onAddBookmark = { showAddBookmark = true; showOverlay = false },
             onToggleTts = { vm.toggleTts() },
+            onToggleAutoRead = { vm.toggleAutoReading() },
             vm = vm
         )
     }
@@ -139,6 +143,7 @@ private fun ReflowReader(
     prefs: com.xs.reader.data.prefs.ReadingPrefs,
     theme: com.xs.reader.ui.theme.ReaderTheme,
     ttsPlaying: Boolean,
+    autoReading: Boolean,
     showOverlay: Boolean,
     onToggleOverlay: () -> Unit,
     onBack: () -> Unit,
@@ -146,6 +151,7 @@ private fun ReflowReader(
     onOpenSettings: () -> Unit,
     onAddBookmark: () -> Unit,
     onToggleTts: () -> Unit,
+    onToggleAutoRead: () -> Unit,
     vm: ReaderViewModel
 ) {
     val density = LocalDensity.current
@@ -344,6 +350,48 @@ private fun ReflowReader(
         }
     }
 
+    // 滚动模式的 ScrollState 上提到这里, 方便自动阅读直接驱动它
+    val scrollState = rememberScrollState()
+
+    // 自动阅读 (横向): 每隔 autoIntervalMs 自动翻一页, 到末尾自动跳下一章。
+    // 用 settledPage 做 key, 避免动画进行中被打断重启。
+    if (prefs.turnMode != "scroll") {
+        LaunchedEffect(autoReading, prefs.autoReadSpeed, pages.size, pagerState.settledPage, hasNext) {
+            if (!autoReading || pages.isEmpty()) return@LaunchedEffect
+            val intervalMs = autoTurnIntervalMs(prefs.autoReadSpeed)
+            kotlinx.coroutines.delay(intervalMs)
+            val cur = pagerState.settledPage
+            when {
+                cur < pages.lastIndex -> pagerState.animateScrollToPage(cur + 1)
+                hasNext -> vm.nextChapter()
+                else -> vm.stopAutoReading()
+            }
+        }
+    } else {
+        // 自动阅读 (滚动): 持续小步向下滚, 到底部自动跳下一章
+        LaunchedEffect(autoReading, prefs.autoReadSpeed, state.currentChapterIndex) {
+            if (!autoReading) return@LaunchedEffect
+            val pxPerSec = autoScrollPxPerSec(prefs.autoReadSpeed)
+            val frameMs = 16L
+            val pxPerFrame = pxPerSec * frameMs / 1000f
+            while (autoReading) {
+                if (scrollState.value >= scrollState.maxValue) {
+                    if (state.currentChapterIndex < state.chapters.lastIndex) {
+                        vm.nextChapter()
+                        // nextChapter() 会触发 currentChapterIndex 变化, LaunchedEffect 重启,
+                        // 新章节正文渲染后 scrollState 会自动归 0, 这里直接退出本轮即可
+                        return@LaunchedEffect
+                    } else {
+                        vm.stopAutoReading()
+                        return@LaunchedEffect
+                    }
+                }
+                scrollState.scrollBy(pxPerFrame)
+                kotlinx.coroutines.delay(frameMs)
+            }
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -403,7 +451,8 @@ private fun ReflowReader(
                     style = textStyle,
                     titleStyle = titleStyle,
                     margin = prefs.pageMarginDp.dp,
-                    bgColor = theme.bgColor
+                    bgColor = theme.bgColor,
+                    scroll = scrollState
                 )
             } else {
                 HorizontalPager(
@@ -503,8 +552,17 @@ private fun ReflowReader(
             exit = slideOutVertically { it } + fadeOut()
         ) {
             BottomAppBar(
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
             ) {
+                // 5 个按钮文字统一保持 4 个汉字宽度,
+                // 让 weight(1f) 等分槽位时视觉重心对齐,不会出现"长文字挤在一起、
+                // 短文字之间空白大"的错觉。
+                ReaderBottomTextAction(
+                    text = if (autoReading) "停止自动" else "自动阅读",
+                    onClick = onToggleAutoRead,
+                    modifier = Modifier.weight(1f),
+                    highlight = autoReading
+                )
                 ReaderBottomTextAction(
                     text = if (ttsPlaying) "停止朗读" else "语音朗读",
                     onClick = onToggleTts,
@@ -517,7 +575,7 @@ private fun ReflowReader(
                     modifier = Modifier.weight(1f)
                 )
                 ReaderBottomTextAction(
-                    text = "目录",
+                    text = "章节目录",
                     onClick = onOpenToc,
                     modifier = Modifier.weight(1f)
                 )
@@ -540,15 +598,13 @@ private fun ReaderBottomTextAction(
 ) {
     TextButton(
         onClick = onClick,
-        modifier = modifier
-            .fillMaxHeight()
-            .padding(horizontal = 2.dp),
+        modifier = modifier.fillMaxHeight(),
         shape = MaterialTheme.shapes.medium,
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp)
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 12.dp)
     ) {
         Text(
             text = text,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             color = if (highlight) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurface,
@@ -563,9 +619,9 @@ private fun ScrollReaderBody(
     style: TextStyle,
     titleStyle: TextStyle,
     margin: androidx.compose.ui.unit.Dp,
-    bgColor: androidx.compose.ui.graphics.Color
+    bgColor: androidx.compose.ui.graphics.Color,
+    scroll: androidx.compose.foundation.ScrollState
 ) {
-    val scroll = rememberScrollState()
     Column(
         Modifier
             .fillMaxSize()
@@ -577,6 +633,27 @@ private fun ScrollReaderBody(
         Spacer(Modifier.height(12.dp))
         Text(text = state.currentChapterText, style = style)
     }
+}
+
+/**
+ * 横向自动翻页的间隔时间(毫秒)。speed ∈ [1, 10]:
+ * - speed = 1  → ≈ 14s/页 (慢速)
+ * - speed = 5  → ≈ 4s/页 (中速)
+ * - speed = 10 → ≈ 2s/页 (快速)
+ */
+private fun autoTurnIntervalMs(speed: Float): Long {
+    val s = speed.coerceIn(1f, 10f)
+    return ((14000f / s) * 0.7f + 600f).toLong().coerceAtLeast(800L)
+}
+
+/**
+ * 滚动模式自动滚动速度 (像素/秒)。speed ∈ [1, 10]:
+ * - speed = 1  → ≈ 24 px/s
+ * - speed = 5  → ≈ 120 px/s
+ * - speed = 10 → ≈ 240 px/s
+ */
+private fun autoScrollPxPerSec(speed: Float): Float {
+    return (speed.coerceIn(1f, 10f) * 24f)
 }
 
 private fun buildPageCacheKey(

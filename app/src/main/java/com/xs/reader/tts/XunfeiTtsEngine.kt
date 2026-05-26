@@ -49,15 +49,15 @@ class XunfeiTtsEngine @Inject constructor(
     private val cacheDir = File(context.cacheDir, "tts").apply { mkdirs() }
 
     /**
-     * 讯飞 WebAPI 没有「列出当前账号已开通的发音人」的接口,所以这里读用户在
-     * 设置页手动添加的预设列表。第一次运行时列表为空,UI 会引导用户照着
-     * 控制台 → 我的发音人 把 vcn 抄进来。
+     * 讯飞 WebAPI 没有「列出当前账号已开通的发音人」的接口,但控制台「在线语音合成 →
+     * 发音人授权管理 → 基础发音人」默认开通的几个 vcn 是固定的。这里把这组内置基础
+     * 发音人 (XunfeiVoicePreset.BUILTIN_XUNFEI) 与用户在设置页自添加的预设合并:
+     * 同 vcn 时用户自定义优先 (可覆盖内置的显示名/性别)。
      */
     override suspend fun listVoices(): List<TtsVoice> {
         val json = prefsRepo.flow.first().xunfeiVoicePresetsJson
-        return XunfeiVoicePreset.listFromJson(json)
-            .filter { it.engineId == id }
-            .map { it.toTtsVoice() }
+        val user = XunfeiVoicePreset.listFromJson(json)
+        return XunfeiVoicePreset.mergedVoicesFor(id, user)
     }
 
     override fun synthesize(request: TtsRequest): Flow<TtsAudio> = callbackFlow {

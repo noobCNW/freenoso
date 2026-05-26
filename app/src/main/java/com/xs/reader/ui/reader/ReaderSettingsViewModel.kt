@@ -37,6 +37,7 @@ class ReaderSettingsViewModel @Inject constructor(
     fun setKeepScreenOn(v: Boolean) = viewModelScope.launch { prefsRepo.setKeepScreenOn(v) }
     fun setCustomFontPath(path: String?) = viewModelScope.launch { prefsRepo.setCustomFontPath(path) }
     fun setShowChapterTitle(v: Boolean) = viewModelScope.launch { prefsRepo.setShowChapterTitle(v) }
+    fun setAutoReadSpeed(v: Float) = viewModelScope.launch { prefsRepo.setAutoReadSpeed(v) }
 
     fun importFontFromUri(context: Context, uri: Uri) {
         viewModelScope.launch {

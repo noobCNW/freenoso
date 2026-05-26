@@ -57,16 +57,15 @@ class XunfeiSuperTtsEngine @Inject constructor(
     private val cacheDir = File(context.cacheDir, "tts").apply { mkdirs() }
 
     /**
-     * 超拟人发音人也得用户自己加。控制台「能力管理 → 超拟人合成 → 我的发音人」可见
-     * 当前账号下已开通的 vcn 列表 (如 `x4_lingyuyan_oral` / `x6_yiweng_pingshu`)。
-     * 如果用户希望按"评书风格"自动套保守的 oral_level/rhy 参数,
-     * 可以在 [XunfeiVoicePreset.style] 字段里填 [STYLE_PINGSHU]。
+     * 内置控制台「超拟人语音合成 → 发音人授权管理」默认开通的"聆"系列基础发音人
+     * (见 [XunfeiVoicePreset.BUILTIN_XUNFEI_SUPER]),并与用户自定义预设合并;
+     * 同 vcn 时以用户自定义优先 (例如用户想给 `x6_lingyuyan_pro` 标 style=pingshu
+     * 自动套评书参数, 自添加同 vcn 的预设即可覆盖)。
      */
     override suspend fun listVoices(): List<TtsVoice> {
         val json = prefsRepo.flow.first().xunfeiVoicePresetsJson
-        return XunfeiVoicePreset.listFromJson(json)
-            .filter { it.engineId == id }
-            .map { it.toTtsVoice() }
+        val user = XunfeiVoicePreset.listFromJson(json)
+        return XunfeiVoicePreset.mergedVoicesFor(id, user)
     }
 
     override fun synthesize(request: TtsRequest): Flow<TtsAudio> = callbackFlow {

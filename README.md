@@ -21,6 +21,7 @@ Android 离线小说阅读器。Kotlin + Jetpack Compose (Material 3) 实现,聚
 - **可调**:字号、行高倍数、段间距、页边距、保持屏幕常亮、是否显示章节大标题
 - **章首大标题**:可在阅读设置里关掉(默认关),正文不会被"水印"挡住
 - **自动连章**:阅读到一章末尾继续向左滑会出现"即将进入下一章"过渡页,松手自动加载下一章并定位到第一页
+- **自动阅读 (自动翻页 / 自动滚动)**:底部"自动阅读"一键开关,横向模式按设定速度自动翻下一页 (动画过渡)、上下模式按设定速度平滑向下滚动;到章末自动续到下一章,无下一章自动停止;速度在阅读设置里 1~10 调节,与 TTS 朗读互斥 (开任一会停掉对方)
 - **断点恢复**:阅读进度节流持久化,重开 App / 重启手机 / 重装(只要数据未清)都能从离开的那页继续
 
 ### 排版性能
@@ -38,8 +39,8 @@ Android 离线小说阅读器。Kotlin + Jetpack Compose (Material 3) 实现,聚
 
 - **4 个朗读引擎**(任选其一,APP 内不内置任何凭据,**全部需要用户在 TTS 设置页自行填写自己的讯飞账号 Key 后才能使用**):
   - **系统 TTS**(完全离线,免费,依赖手机自带的中文语音数据)
-  - **讯飞普通版**(在线 WebAPI,需要 AppID/APIKey/APISecret;**发音人需用户照着控制台「我的发音人」自行添加 vcn 参数**,APP 不再硬编码音色列表)
-  - **讯飞超拟人**(在线 WebAPI,音质比普通版好一档,自带评书 / 电台 / 动漫等高表演力发音人;需要 AppID/APIKey/APISecret + Resource ID,与普通版完全独立;同样需要用户自行添加 vcn)
+  - **讯飞普通版**(在线 WebAPI,需要 AppID/APIKey/APISecret;**已内置控制台默认免费开通的 5 个基础发音人** —— 讯飞·小燕 (`x4_xiaoyan`) / 讯飞·小露 (`x4_yezi`) / 讯飞·许久 (`aisjiuxu`) / 讯飞·小婧 (`aisjinger`) / 讯飞·许小宝 (`aisbabyxu`),开箱即用;若你账号还开通了其它特色发音人,可在「我的发音人」追加 vcn,同 vcn 的自定义会覆盖内置)
+  - **讯飞超拟人**(在线 WebAPI,音质比普通版好一档,自带评书 / 电台 / 动漫等高表演力发音人;需要 AppID/APIKey/APISecret + Resource ID,与普通版完全独立;**已内置控制台默认开通的 5 个"聆"系列发音人** —— 聆飞逸 (`x6_lingfeiyi_pro`,男) / 聆小璇 (`x6_lingxiaoxuan_pro`,女) / 聆玉昭 (`x5_lingyuzhao_flow`,女) / 聆小玥 (`x6_lingxiaoyue_pro`,女) / 聆玉言 (`x6_lingyuyan_pro`,女);评书 / 自训等其它发音人同样在「我的超拟人发音人」里追加)
   - **讯飞离线 (高品质)**:基于讯飞官方 AIKit `XTTS10` SDK 集成,**首次联网激活一次**(消耗 1 个装机额度),之后**完全离线、零字符费用、无并发限制**,内置晓燕(温柔女声)/ 晓峰(沉稳男声)两位发音人
 - **评书一键预设**:讯飞超拟人引擎下提供"切到儒雅大叔 + 慢速 + 略压音调 + 韵律强化"的一键应用,听感最接近评书
 - **句子级流式合成 + 边播边合**:`SentenceSplitter` 按标点切句,`TtsController` 提前合成下 1~2 句,`ExoPlayer` 串播
@@ -76,9 +77,9 @@ app/src/main/java/com/xs/reader/
   tts/
     TtsEngine.kt              统一接口 (synthesize → Flow<TtsAudio>)
     SystemTtsEngine.kt        Android 内置 (离线, 含语言数据自检与跳系统设置引导)
-    XunfeiTtsEngine.kt        讯飞普通版 WebAPI /v2/tts (从 prefs 读用户自加的发音人)
-    XunfeiSuperTtsEngine.kt   讯飞超拟人 WebAPI /v1/private/<resource_id> (同上)
-    XunfeiVoicePreset.kt      用户自定义发音人模型 (vcn + 显示名 + 性别/风格), JSON 存 DataStore
+    XunfeiTtsEngine.kt        讯飞普通版 WebAPI /v2/tts (内置基础发音人 + 用户自加合并)
+    XunfeiSuperTtsEngine.kt   讯飞超拟人 WebAPI /v1/private/<resource_id> (内置"聆"系列 + 用户自加合并)
+    XunfeiVoicePreset.kt      发音人模型 + 内置 vcn 列表 (BUILTIN_XUNFEI / BUILTIN_XUNFEI_SUPER), 用户自定义 JSON 存 DataStore
     XunfeiOfflineSdkManager.kt 讯飞 AIKit 离线 SDK 全局单例 (鉴权/资源拷贝)
     XunfeiOfflineTtsEngine.kt  讯飞离线高品质 TTS (XTTS10, ABILITY=e2e44feff)
     TtsEngineRegistry.kt      引擎注册表
@@ -91,7 +92,7 @@ app/src/main/java/com/xs/reader/
 
 > 离线 TTS 资源:`app/libs/AIKit.aar`(讯飞 AIKit SDK,~7.4 MB)、`app/src/main/assets/iflytek/xtts/*`(5 个 .dat / .irf 音色资源,共 ~35 MB)、`app/build.gradle.kts` 用 `abiFilters arm64-v8a, armeabi-v7a` 过滤掉 SDK 不支持的 x86 架构。
 
-底部条只放 4 个文字按钮:**语音朗读 · 添加书签 · 目录 · 阅读设置**(顶部条只保留「返回」+ 书名,避免太多小图标)。
+底部条 5 个文字按钮:**自动阅读 · 语音朗读 · 添加书签 · 章节目录 · 阅读设置**(顶部条只保留「返回」+ 书名,避免太多小图标)。
 
 ## 构建
 
@@ -139,19 +140,20 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 > 三个讯飞引擎的凭据**完全独立保存**(因为讯飞每个能力包是独立计费的,通常不会共用同一组 Key):普通版、超拟人、离线分别在自己的表单里维护。所有 Key 都通过 `EncryptedSharedPreferences`(`SecureKeyStore`)加密保存在设备上,不上传到任何服务器。
 
-#### 讯飞在线引擎 · 添加发音人
+#### 讯飞在线引擎 · 内置 + 自定义发音人
 
-讯飞 WebAPI **没有「列出当前账号已开通发音人」的查询接口**,所以 APP 没有硬编码音色列表,需要用户照着控制台抄一遍 vcn 进来:
+讯飞 WebAPI **没有「列出当前账号已开通发音人」的查询接口**,但控制台「发音人授权管理」默认开通的基础发音人是固定那几个,所以 APP 把它们写死成了内置音色,**填完 Key 直接就能在「可用音色」里选**,不用再手抄 vcn。
 
-1. 登陆 [讯飞开放平台](https://www.xfyun.cn/) → 控制台 → 我的应用 → 选中你创建的应用 → **能力管理 → 在线语音合成**(超拟人是「超拟人合成」)→ **我的发音人** Tab
-2. 看页面表格里 **`参数 (vcn / voice_name)`** 那一列,例如:
-   - 讯飞小燕 / `x4_xiaoyan`
-   - 讯飞小露 / `x4_yezi`
-   - 讯飞许久 / `aisjiuxu`
-   - 讯飞小婧 / `aisjinger`
-   - 讯飞许小宝 / `aisbabyxu`
-3. 在 APP 里:朗读引擎 → 选中「讯飞普通版 / 讯飞超拟人」→ 「**+ 添加发音人**」→ 把 vcn 和你想要的显示名填进去 → 保存
-4. 列表里就会出现这条音色,点中即可作为当前声音,旁边的「试听」按钮可以马上验证是否能合成成功
+**内置音色(已默认开通,直接可用)**:
+
+- 讯飞普通版:讯飞·小燕 (`x4_xiaoyan`) / 讯飞·小露 (`x4_yezi`) / 讯飞·许久 (`aisjiuxu`) / 讯飞·小婧 (`aisjinger`) / 讯飞·许小宝 (`aisbabyxu`)
+- 讯飞超拟人:聆飞逸 (`x6_lingfeiyi_pro`) / 聆小璇 (`x6_lingxiaoxuan_pro`) / 聆玉昭 (`x5_lingyuzhao_flow`) / 聆小玥 (`x6_lingxiaoyue_pro`) / 聆玉言 (`x6_lingyuyan_pro`)
+
+**追加你账号特有的其它发音人**(评书 / 动漫 / 自训等需要单独领取或付费的 vcn):
+
+1. 登陆 [讯飞开放平台](https://www.xfyun.cn/) → 控制台 → 我的应用 → **能力管理 → 在线语音合成 / 超拟人合成 → 发音人授权管理**,看「特色发音人」里你已经领取或购买过的 vcn
+2. APP 里:朗读引擎 → 选中对应引擎 → 「**+ 添加发音人**」→ 把 vcn 和显示名填进去保存
+3. 同 vcn 的自定义会**覆盖**内置 (如果你想给某个内置发音人改个显示名,或者给超拟人 `x6_lingyuyan_pro` 标 `style=pingshu` 套评书参数,直接加同 vcn 的预设即可)
 
 > 如果填错了 vcn 或者填了一个**未在你账号下开通**的 vcn,合成时会返回 `code=11200 LiccCheck`,APP 会把这个错码翻成人话提示;此时把那条预设删了重添,或回控制台领取/购买对应发音人即可。
 

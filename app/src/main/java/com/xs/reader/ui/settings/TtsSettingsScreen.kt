@@ -132,7 +132,7 @@ fun TtsSettingsScreen(
             } else if (state.voices.isEmpty()) {
                 val emptyHint = when (state.activeEngineId) {
                     "xunfei", "xunfei_super" ->
-                        "还没有添加发音人。请到讯飞控制台「能力管理 → 我的发音人」复制 vcn 参数 (例如 x4_xiaoyan / aisjiuxu),用上方「+ 添加发音人」加进来。"
+                        "暂无可用音色 (内置音色加载失败)。可到讯飞控制台「能力管理 → 我的发音人」复制 vcn 参数 (例如 x4_xiaoyan / aisjiuxu),用上方「+ 添加发音人」加进来。"
                     else -> "暂无可用音色,请检查 Key 或网络。"
                 }
                 Text(emptyHint, color = MaterialTheme.colorScheme.error)
@@ -621,6 +621,7 @@ private fun XunfeiVoicePresetSection(
     var editing by remember { mutableStateOf<XunfeiVoicePreset?>(null) }
 
     val sectionTitle = if (engineId == "xunfei_super") "我的超拟人发音人" else "我的发音人"
+    val builtinCount = XunfeiVoicePreset.builtinFor(engineId).size
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -633,6 +634,15 @@ private fun XunfeiVoicePresetSection(
                 Spacer(Modifier.width(4.dp))
                 Text("添加发音人")
             }
+        }
+        if (builtinCount > 0) {
+            Text(
+                "已内置控制台「发音人授权管理」默认免费开通的 $builtinCount 个基础音色," +
+                    "见上方「可用音色」。如需使用控制台里你账号特有的其它 vcn (如评书 / 动漫 / 自训发音人)," +
+                    "在这里追加即可,同 vcn 的自定义会覆盖内置显示名。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline
+            )
         }
         if (list.isEmpty()) {
             Text(
