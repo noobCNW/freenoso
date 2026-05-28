@@ -141,14 +141,16 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## TTS 配置说明
 
-| 引擎 | 是否需配置 | 是否联网 | 说明 |
-| --- | --- | --- | --- |
-| 系统 TTS | 否 | 完全离线 | 依赖手机自带 / 已安装的 TTS 引擎与中文语音数据。设置页内有「前往系统 TTS 设置」按钮一键跳转下载语音数据 |
-| 讯飞普通版 | **需要** | 在线 | 在 [讯飞开放平台](https://www.xfyun.cn/) 注册 → 创建应用 → 开通「在线语音合成」,把 AppID/APIKey/APISecret 填到 TTS 设置 → 讯飞普通版凭据 |
-| 讯飞超拟人 | **需要** | 在线 | 在控制台开通「超拟人合成」,把 AppID/APIKey/APISecret + Resource ID(WebAPI 地址末段,形如 `mcd9m97e6`)填到 TTS 设置 → 讯飞超拟人凭据 |
-| 讯飞离线 (高品质) | **需要** + 首次激活 | 首次联网,之后离线 | 在控制台开通「离线语音合成 (高品质版)」对应的 SDK 包,把 AppID/APIKey/APISecret 填进 TTS 设置 → 讯飞离线凭据,**点「立即激活」并保持联网,看到状态变成"已激活 ✓"就能完全离线朗读**。每个设备激活会消耗一个装机额度,控制台可见剩余额度 |
+| 引擎 | 引擎 ID | 是否需配置 | 是否联网 | 说明 |
+| --- | --- | --- | --- | --- |
+| 系统 TTS | `system` | 否 | 完全离线 | 依赖手机自带 / 已安装的 TTS 引擎与中文语音数据。设置页内有「前往系统 TTS 设置」按钮一键跳转下载语音数据 |
+| 讯飞普通版 | `xunfei` | **需要** | 在线 | 在 [讯飞开放平台](https://www.xfyun.cn/) 注册 → 创建应用 → 开通「在线语音合成」,把 AppID/APIKey/APISecret 填到 TTS 设置 |
+| 讯飞超拟人 | `xunfei_super` | **需要** | 在线 | 开通「超拟人合成」,同一组 AppID/APIKey/APISecret + Resource ID(WebAPI 地址末段,形如 `mcd9m97e6`) |
+| matcha 离线神经 | `matcha_zh_baker` | 否 | 完全离线 | APK 已预装模型;首启 `ReaderApp` 自动从 assets 拷贝到 `filesDir`,设置页可看进度。无预装包的构建可在线散文件下载(见下文) |
 
-> 三个讯飞引擎的凭据**完全独立保存**(因为讯飞每个能力包是独立计费的,通常不会共用同一组 Key):普通版、超拟人、离线分别在自己的表单里维护。所有 Key 都通过 `EncryptedSharedPreferences`(`SecureKeyStore`)加密保存在设备上,不上传到任何服务器。
+> 讯飞普通版与超拟人**共用一组凭据**,保存在 `SecureKeyStore` 的 `xunfei` 命名空间;超拟人额外需要 Resource ID。所有 Key 经 `EncryptedSharedPreferences` 加密,仅存本机。
+>
+> **历史说明**:早期版本曾集成讯飞 AIKit「离线语音合成 (高品质版)」(`xunfei_offline`),因控制台授权与 SDK 类型不匹配(MSC vs AIKit)及装机额度等问题已移除,由开源 matcha + sherpa-onnx 替代。旧版 `xunfei_offline` 密钥会在升级时自动合并进 `xunfei` 命名空间。
 
 #### 讯飞在线引擎 · 内置 + 自定义发音人
 
@@ -169,16 +171,56 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 > 超拟人发音人如果想自动套"评书"效果,在添加对话框「风格」字段填 `pingshu`,合成时引擎会自动加上 `oral_level=low + rhy=1` 让讯飞侧出韵律。
 
-#### 讯飞离线引擎 · 排坑指南
+#### matcha 离线引擎 · 开发与排坑
 
-- **包名必须匹配**:讯飞控制台为每个 SDK 包绑定固定的 Android 包名,本仓库用的是 `com.xs.reader`。如果换成你自己的 AppID,记得到讯飞控制台「能力管理 → 离线语音合成 → 应用包名」加入 `com.xs.reader`(或改 `applicationId`)。否则鉴权返回 `code=18307`
-- **首次激活必须联网**:本地 SDK 启动时会向讯飞授权服务器拉鉴权协议,一旦本机激活成功,授权信息会缓存到 `filesDir/iflytek/`,之后离线可用
-- **音色文件已打包进 APK**:无需用户手动下载。`XunfeiOfflineSdkManager` 第一次调用 `ensureReady()` 会把 `assets/iflytek/xtts/*` 拷到 `filesDir/iflytek/xtts/`,SDK 从那里读取
-- **只支持 arm 架构**:`build.gradle.kts` 已用 `abiFilters` 把 x86 / x86_64 排除,所以模拟器请用 arm64 镜像调试
-- **首次启动慢**:第一次合成会触发 SDK 全局 init + 联网激活,通常 5~15 秒,设置页底部的「立即激活」按钮可以提前完成激活,正式朗读时就不会卡顿
-- **`.dat` / `.irf` 必须配 `noCompress`**:AGP 默认会用 deflate 压缩 assets,而被压缩的资源不能 `AssetManager.openFd()` 直接读 fd,会抛 `FileNotFoundException("This file can not be opened as a file descriptor; it is probably compressed")`。`build.gradle.kts` 里通过 `androidResources { noCompress += listOf("dat", "irf", "jet") }` 让讯飞音色资源以 stored 模式打包,代价是 APK 多 ~12 MB(从 60M → 72M),收益是首次拷贝可以走 fd 零拷贝、且 SDK 内部任何 fd 访问也不会失败
+**模型组成**(sherpa-onnx 把声学模型与声码器分开发布,本仓库在 assets 里已合并齐全):
 
-凭据表单底部有统一的「保存」操作栏:输入框是局部 state,变化后会显示"有未保存的修改",点了「保存」才真正写到加密存储,避免每按一键就持久化、也让"未保存"的语义清晰。
+| 文件 | 来源 | 作用 |
+| --- | --- | --- |
+| `model-steps-3.onnx` | [HF: csukuangfj/matcha-icefall-zh-baker](https://huggingface.co/csukuangfj/matcha-icefall-zh-baker) | Matcha 声学模型 (3-step, 移动端推荐) |
+| `hifigan_v2.onnx` | [GitHub Release: vocoder-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vocoder-models) | HiFi-GAN 声码器 (~3.6 MB) |
+| `lexicon.txt` / `tokens.txt` / `*.fst` | 同上 HF repo | 拼音词典 + 文本正则化 |
+| `dict/**` | 同上 HF repo | jieba 中文分词 (lexicon 模式必需) |
+
+**就位流程** (`MatchaModelManager`):
+
+1. `ReaderApp.onCreate` 后台调用 `ensureReady()`;
+2. 若 `filesDir/tts/matcha-icefall-zh-baker/` 已完整 → `Ready`;
+3. 否则若 APK 内 `assets/matcha-icefall-zh-baker/` 齐全 → `Installing`,逐文件拷贝 (支持断点续传,已存在且大小合理的文件跳过);
+4. 否则 → `Downloading`,按 16 个散文件从 hf-mirror.com / huggingface.co / GitHub 依次尝试;
+5. `MatchaTtsEngine` 在首次 `synthesize` 时于 IO 线程懒加载 `OfflineTts` (~80 MB 进 RAM,勿放主线程)。
+
+**在线下载兜底 URL**(无预装 assets 的精简包时用):
+
+- 声学 / 词典:`https://hf-mirror.com/csukuangfj/matcha-icefall-zh-baker/resolve/main/<path>`
+- 声码器:`https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/hifigan_v2.onnx`
+
+> 不要用 `tts-models/matcha-icefall-zh-baker.tar.bz2` 整包:官方 tar 里**不含** `hifigan_v2.onnx`,解压后完整性校验必失败。
+
+**常见坑**:
+
+- **`noCompress` 必配**:后缀 `onnx` / `fst` / `utf8` 已在 `build.gradle.kts` 的 `androidResources.noCompress` 中;新增同类大文件请同步加入,否则首启拷贝极慢。
+- **磁盘双份占用**:APK ~171 MB + 拷贝后 `filesDir` ~100 MB,设备上合计约 270 MB;删模型只清 `filesDir`,APK 内 assets 仍在。
+- **只支持 arm**:与 sherpa-onnx AAR 一致,`abiFilters` 仅 `arm64-v8a` / `armeabi-v7a`,模拟器请用 arm64 镜像。
+- **不支持音调**:matcha baker 单 speaker,`TtsRequest.pitch` 被忽略;语速映射为 sherpa `lengthScale = 1/speed`。
+- **首次合成慢**:除拷贝外,第一次 `OfflineTts` 加载 ONNX 约 3~10 秒,属正常;实例由 `MatchaTtsEngine` 单例复用。
+- **Git 大文件**:`model-steps-3.onnx` (~72 MB) 与 `sherpa-onnx-*.aar` (~54 MB) 超过 GitHub 50 MB 建议值但未超 100 MB 硬限;仓库变大时可考虑 Git LFS。
+
+**更新预装模型**(开发者):
+
+```bash
+# 在项目根执行,写入 app/src/main/assets/matcha-icefall-zh-baker/
+ASSET=app/src/main/assets/matcha-icefall-zh-baker
+HF=https://hf-mirror.com/csukuangfj/matcha-icefall-zh-baker/resolve/main
+mkdir -p "$ASSET/dict/pos_dict"
+curl -fsSL "$HF/model-steps-3.onnx" -o "$ASSET/model-steps-3.onnx"
+curl -fsSL "$HF/lexicon.txt" -o "$ASSET/lexicon.txt"
+# ... 其余 13 个文件同理,见 MatchaModelManager.MODEL_FILES
+curl -fsSL https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/hifigan_v2.onnx \
+  -o "$ASSET/hifigan_v2.onnx"
+```
+
+凭据表单底部有统一的「保存」操作栏(仅讯飞在线引擎):输入框是局部 state,变化后会显示"有未保存的修改",点了「保存」才真正写到加密存储。
 
 ## 关键实现要点
 
@@ -219,17 +261,32 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 4. 当前句播放结束 → `onSentenceChanged(range)` 上抛给 ViewModel,UI 高亮跟随;
 5. 连续 3 次合成失败,停止整章并填 `errorMessage`,UI `SnackbarHost` 弹出。
 
+matcha 引擎额外注意:`synthesize` 返回 `FloatArray` 转 16-bit PCM;合成在 `Dispatchers.IO`,`OfflineTts` 由 `MatchaTtsEngine` 全局单例持有,切引擎或删模型时需 `close()` 释放 native 句柄。
+
+### matcha 设置页 UI
+
+选中 `matcha_zh_baker` 时显示 `MatchaModelCard`,状态机:
+
+| 状态 | UI |
+| --- | --- |
+| `Missing` | 「立即安装」或「下载离线模型」(取决于 `hasBundledAssets()`) |
+| `Installing` | 进度条 + 当前拷贝文件名 |
+| `Downloading` | 进度条 + 当前下载文件名 (在线兜底) |
+| `Ready` | ✓ 已就绪 + 「删除」 |
+| `Failed` | 错误信息 + 重试 |
+
 ## 已知限制 / 未完成
 
 - 扫描型 PDF 拿不到文字层,目前 PDF 只支持按页浏览,不支持朗读
 - TXT 章节标题模式覆盖了主流网文 / 出版物,极个别非标题但形似(如某些诗体)可能误判,可在书架长按 → 「重新切分章节」重新尝试
-- 讯飞离线引擎只随包带了晓燕 / 晓峰两位中文发音人,如要更多发音人需要自行去讯飞控制台下载对应的 `.dat` / `.irf` 文件丢进 `app/src/main/assets/iflytek/xtts/` 并重新打包
-- `app/libs/sherpa-onnx-1.13.0.aar` 已下载但未在依赖里启用,Sherpa-ONNX 离线神经 TTS 引擎实现尚未完工(待补 `SherpaOfflineTtsEngine` + 模型下载 UI);如不需要可直接删该文件释放仓库空间
+- matcha 仅标贝单女声,无多说话人 / 无音调调节;音质与延迟取决于设备 CPU,中低端机长句合成可能数秒
+- APK 因预装模型约 171 MB,Git 仓库含 ~110 MB 二进制;上架应用商店前可考虑 productFlavor(预装版 vs 在线下载精简版)或 Git LFS
+- 模拟器需 arm64 镜像;x86 模拟器无法加载 sherpa-onnx native 库
 
 ## 开发约定
 
 - 提交保持小颗粒,提交信息聚焦"为什么改"而非"改了什么"
 - 新增的工程文件请同步在本 README 的 `工程结构` 段加一行
-- 修讯飞 API 时务必同步检查 `EngineHint` 文案,以及 `SystemTtsEngine` 报错文本里对其它引擎的引用,避免出现"建议切换到不存在的引擎"
+- 修讯飞 API 或 matcha 模型流程时务必同步检查 `EngineHint` / `MatchaModelCard` 文案,以及 `SystemTtsEngine`、`MatchaTtsEngine` 报错里对其它引擎的引用,避免出现"建议切换到不存在的引擎"
 - 调整 `ReadingPrefs` 字段时要顺手把 `buildPageCacheKey`(`ReaderContent.kt`)的拼接也加上,否则 LRU 缓存可能在偏好变化后还命中旧排版
 - 往 `app/src/main/assets/` 加任何**自定义后缀**的二进制资源(SDK 模型、字典、词库等),如果调用方会用 `AssetManager.openFd()` 读 fd,务必同步在 `app/build.gradle.kts` 的 `androidResources.noCompress` 加这个后缀,否则运行时会抛 "...probably compressed" 的 `FileNotFoundException`
