@@ -61,13 +61,15 @@ class XunfeiTtsEngine @Inject constructor(
     }
 
     override fun synthesize(request: TtsRequest): Flow<TtsAudio> = callbackFlow {
-        val appId = keyStore.get(id, "app_id")?.takeIf { it.isNotBlank() }
-        val apiKey = keyStore.get(id, "api_key")?.takeIf { it.isNotBlank() }
-        val apiSecret = keyStore.get(id, "api_secret")?.takeIf { it.isNotBlank() }
+        // 普通版 / 超拟人 / 离线 SDK 三个讯飞引擎共享同一份控制台凭据,
+        // 统一从 XUNFEI_SHARED_NS 读取 (即与本引擎 id="xunfei" 同名的命名空间)。
+        val appId = keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, "app_id")?.takeIf { it.isNotBlank() }
+        val apiKey = keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, "api_key")?.takeIf { it.isNotBlank() }
+        val apiSecret = keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, "api_secret")?.takeIf { it.isNotBlank() }
         if (appId.isNullOrBlank() || apiKey.isNullOrBlank() || apiSecret.isNullOrBlank()) {
             close(
                 IllegalStateException(
-                    "讯飞 TTS 凭据缺失,请到 设置 → 朗读引擎 → 讯飞 (普通版) 填写自己的 AppID/APIKey/APISecret 后再朗读。"
+                    "讯飞 TTS 凭据缺失,请到 设置 → 朗读引擎 填写 AppID/APIKey/APISecret 后再朗读。"
                 )
             )
             return@callbackFlow

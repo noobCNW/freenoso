@@ -20,12 +20,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.xs.reader.tts.MatchaModelManager
 import com.xs.reader.tts.TtsVoice
 import com.xs.reader.tts.XunfeiSuperTtsEngine
 import com.xs.reader.tts.XunfeiVoicePreset
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.font.FontFamily
 
@@ -73,10 +76,19 @@ fun TtsSettingsScreen(
             EngineHint(state.activeEngineId)
 
             // Engine-specific config inputs
+            //
+            // 两个讯飞在线引擎 (普通版 / 超拟人) 在控制台是同一应用同一份凭据,
+            // 这里合并成一张「讯飞凭据」卡片 (XunfeiSharedCredCard) 共享显示。
+            // 超拟人的 Resource ID 是独有的,单独再加一张小卡片。
+            // matcha 引擎需要下载 ~105MB 模型才能用,挂自己的下载卡片。
             when (state.activeEngineId) {
-                "xunfei" -> XunfeiKeyForm(vm = vm)
-                "xunfei_super" -> XunfeiSuperKeyForm(vm = vm)
-                "xunfei_offline" -> XunfeiOfflineKeyForm(vm = vm)
+                "xunfei", "xunfei_super" -> {
+                    XunfeiSharedCredCard(vm = vm)
+                    if (state.activeEngineId == "xunfei_super") {
+                        XunfeiSuperResourceIdCard(vm = vm)
+                    }
+                }
+                "matcha_zh_baker" -> MatchaModelCard(vm = vm)
                 else -> {} // system 无需 Key
             }
 
@@ -175,9 +187,9 @@ fun TtsSettingsScreen(
 private fun EngineHint(engineId: String) {
     val (text, color) = when (engineId) {
         "system" -> "完全离线,需要手机自带的 TTS 引擎支持中文。如果系统自带是华为/小米的国产引擎,通常已经自带中文; 否则点下方'前往系统 TTS 设置'下载语音数据。" to MaterialTheme.colorScheme.outline
-        "xunfei" -> "讯飞「在线流式 TTS」。需要自行到 [讯飞开放平台](https://www.xfyun.cn/) 注册账号并创建应用,把 AppID/APIKey/APISecret 填到下方。中国大陆直连稳定,无需 VPN。" to MaterialTheme.colorScheme.outline
-        "xunfei_super" -> "讯飞「超拟人语音合成」,音质比普通版好一档,自带评书/电台/动漫等高表演力发音人。需在控制台开通,并填写 AppID/APIKey/APISecret + 专属 Resource ID。" to MaterialTheme.colorScheme.outline
-        "xunfei_offline" -> "讯飞「离线语音合成 (高品质版)」,首次使用需联网激活一次,激活后完全离线、零网络/零字符费用,但每台设备占一个授权位 (装机量)。仅 2 个发音人: 晓燕/晓峰。" to MaterialTheme.colorScheme.outline
+        "xunfei" -> "讯飞「在线流式 TTS」。需到 [讯飞开放平台](https://www.xfyun.cn/) 注册账号并创建应用,在下方「讯飞应用凭据」填一次即可,普通版/超拟人两个引擎共用。中国大陆直连稳定,无需 VPN。" to MaterialTheme.colorScheme.outline
+        "xunfei_super" -> "讯飞「超拟人语音合成」,音质比普通版好一档,自带评书/电台/动漫等高表演力发音人。沿用下方共享的「讯飞应用凭据」,再单独填一个超拟人专属的 Resource ID 即可。" to MaterialTheme.colorScheme.outline
+        "matcha_zh_baker" -> "开源神经 TTS (sherpa-onnx + matcha-icefall-zh-baker)。完全离线、零字符费、无装机量限制,音质接近商用; 首次使用需下载 ~105MB 模型 (建议 WiFi)。下载后即便断网也能用。" to MaterialTheme.colorScheme.outline
         else -> null to MaterialTheme.colorScheme.outline
     }
     if (text != null) {
@@ -363,204 +375,26 @@ private fun FlowRowSimple(
     }
 }
 
+/**
+ * 讯飞「应用凭据」卡片 —— 三个讯飞引擎 (普通版 / 超拟人 / 离线 SDK) 共用同一份凭据,
+ * 因此这个卡片在 active 引擎是任一讯飞引擎时都展示同一套表单 / 摘要。
+ *
+ * 两种显示态:
+ *  - 已保存 (hasXunfeiSharedCreds && !editing): 折叠成一行掩码摘要 + 「编辑」按钮
+ *  - 编辑中 (editing 或尚未保存过): 展开 3 个输入框 + 保存/取消
+ */
 @Composable
-private fun XunfeiKeyForm(vm: TtsSettingsViewModel) {
-    val savedAppId = vm.getStoredKey("app_id") ?: ""
-    val savedApiKey = vm.getStoredKey("api_key") ?: ""
-    val savedApiSecret = vm.getStoredKey("api_secret") ?: ""
-    var appId by remember { mutableStateOf(savedAppId) }
-    var apiKey by remember { mutableStateOf(savedApiKey) }
-    var apiSecret by remember { mutableStateOf(savedApiSecret) }
-    var savedSnapshot by remember {
-        mutableStateOf(Triple(savedAppId, savedApiKey, savedApiSecret))
-    }
-    val dirty = Triple(appId, apiKey, apiSecret) != savedSnapshot
+private fun XunfeiSharedCredCard(vm: TtsSettingsViewModel) {
+    // 通过这个 trigger 强制重新读取 keyStore (saveKeys 后递增, 让 derivedSavedXxx 重算)
+    var reloadTrigger by remember { mutableStateOf(0) }
+    val savedAppId = remember(reloadTrigger) { vm.getXunfeiSharedKey("app_id") ?: "" }
+    val savedApiKey = remember(reloadTrigger) { vm.getXunfeiSharedKey("api_key") ?: "" }
+    val savedApiSecret = remember(reloadTrigger) { vm.getXunfeiSharedKey("api_secret") ?: "" }
+    val hasCreds = savedAppId.isNotBlank() && savedApiKey.isNotBlank() && savedApiSecret.isNotBlank()
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("讯飞普通版凭据", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "三个值都需要填,分别从 [讯飞开放平台](https://www.xfyun.cn/) 控制台 → 应用详情页复制。注意 APISecret 是一长串十六进制,务必整段复制不要漏字符。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline
-        )
-        OutlinedTextField(
-            value = appId,
-            onValueChange = { appId = it },
-            label = { Text("AppID") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it },
-            label = { Text("APIKey") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = apiSecret,
-            onValueChange = { apiSecret = it },
-            label = { Text("APISecret") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        KeyFormSaveBar(
-            dirty = dirty,
-            onSave = {
-                vm.saveKeys(
-                    mapOf(
-                        "app_id" to appId,
-                        "api_key" to apiKey,
-                        "api_secret" to apiSecret
-                    )
-                )
-                savedSnapshot = Triple(appId, apiKey, apiSecret)
-            }
-        )
-    }
-}
+    // 首次进入: 有凭据 → 折叠; 没凭据 → 直接展开输入态
+    var editing by remember { mutableStateOf(!hasCreds) }
 
-@Composable
-private fun XunfeiSuperKeyForm(vm: TtsSettingsViewModel) {
-    val savedAppId = vm.getStoredKey("app_id") ?: ""
-    val savedApiKey = vm.getStoredKey("api_key") ?: ""
-    val savedApiSecret = vm.getStoredKey("api_secret") ?: ""
-    val savedResourceId = vm.getStoredKey("resource_id") ?: ""
-    var appId by remember { mutableStateOf(savedAppId) }
-    var apiKey by remember { mutableStateOf(savedApiKey) }
-    var apiSecret by remember { mutableStateOf(savedApiSecret) }
-    var resourceId by remember { mutableStateOf(savedResourceId) }
-    var savedSnapshot by remember {
-        mutableStateOf(listOf(savedAppId, savedApiKey, savedApiSecret, savedResourceId))
-    }
-    val dirty = listOf(appId, apiKey, apiSecret, resourceId) != savedSnapshot
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("讯飞超拟人凭据", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "凭据与「讯飞 (普通版)」分开保存。Resource ID 见控制台「超拟人合成 API」一栏 (URL 末段, 形如 mcd9m97e6)。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline
-        )
-        OutlinedTextField(
-            value = appId,
-            onValueChange = { appId = it },
-            label = { Text("AppID") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it },
-            label = { Text("APIKey") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = apiSecret,
-            onValueChange = { apiSecret = it },
-            label = { Text("APISecret") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = resourceId,
-            onValueChange = { resourceId = it },
-            label = { Text("Resource ID") },
-            placeholder = { Text("如 mcd9m97e6") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        KeyFormSaveBar(
-            dirty = dirty,
-            onSave = {
-                vm.saveKeys(
-                    mapOf(
-                        "app_id" to appId,
-                        "api_key" to apiKey,
-                        "api_secret" to apiSecret,
-                        "resource_id" to resourceId
-                    )
-                )
-                savedSnapshot = listOf(appId, apiKey, apiSecret, resourceId)
-            }
-        )
-    }
-}
-
-@Composable
-private fun XunfeiOfflineKeyForm(vm: TtsSettingsViewModel) {
-    val savedAppId = vm.getStoredKey("app_id") ?: ""
-    val savedApiKey = vm.getStoredKey("api_key") ?: ""
-    val savedApiSecret = vm.getStoredKey("api_secret") ?: ""
-    var appId by remember { mutableStateOf(savedAppId) }
-    var apiKey by remember { mutableStateOf(savedApiKey) }
-    var apiSecret by remember { mutableStateOf(savedApiSecret) }
-    var savedSnapshot by remember {
-        mutableStateOf(Triple(savedAppId, savedApiKey, savedApiSecret))
-    }
-    val dirty = Triple(appId, apiKey, apiSecret) != savedSnapshot
-    val authState by vm.offlineAuthState.collectAsState()
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("讯飞离线 (高品质) 凭据", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "首次使用需联网激活,激活会消耗 1 个装机额度 (控制台「离线语音合成(高品质版)」可见剩余装机量)。激活后完全离线、不再产生网络/字符费用。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline
-        )
-        OutlinedTextField(
-            value = appId,
-            onValueChange = { appId = it },
-            label = { Text("AppID") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it },
-            label = { Text("APIKey") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = apiSecret,
-            onValueChange = { apiSecret = it },
-            label = { Text("APISecret") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        KeyFormSaveBar(
-            dirty = dirty,
-            onSave = {
-                vm.saveKeys(
-                    mapOf(
-                        "app_id" to appId,
-                        "api_key" to apiKey,
-                        "api_secret" to apiSecret
-                    )
-                )
-                savedSnapshot = Triple(appId, apiKey, apiSecret)
-            }
-        )
-        XunfeiOfflineAuthCard(
-            state = authState,
-            onActivate = { vm.activateXunfeiOffline() }
-        )
-    }
-}
-
-@Composable
-private fun XunfeiOfflineAuthCard(
-    state: XunfeiOfflineAuthUiState,
-    onActivate: () -> Unit
-) {
-    val (badgeText, badgeColor) = when (state) {
-        is XunfeiOfflineAuthUiState.Idle -> "未激活" to MaterialTheme.colorScheme.outline
-        is XunfeiOfflineAuthUiState.Activating -> "正在激活…" to MaterialTheme.colorScheme.tertiary
-        is XunfeiOfflineAuthUiState.Ready -> "已激活 ✓" to MaterialTheme.colorScheme.primary
-        is XunfeiOfflineAuthUiState.Failed -> "激活失败" to MaterialTheme.colorScheme.error
-    }
     Surface(
         shape = MaterialTheme.shapes.medium,
         tonalElevation = 2.dp,
@@ -570,36 +404,357 @@ private fun XunfeiOfflineAuthCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("离线 SDK 鉴权", style = MaterialTheme.typography.titleSmall)
+                    Text("讯飞应用凭据", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "状态: $badgeText",
+                        "普通版 / 超拟人 两个引擎共用同一份凭据; 在 [讯飞开放平台](https://www.xfyun.cn/) 控制台同一应用的详情页一次复制即可。",
                         style = MaterialTheme.typography.bodySmall,
-                        color = badgeColor
+                        color = MaterialTheme.colorScheme.outline
                     )
                 }
-                val activating = state is XunfeiOfflineAuthUiState.Activating
-                Button(
-                    onClick = onActivate,
-                    enabled = !activating
-                ) {
-                    if (activating) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("激活中")
-                    } else {
-                        Text("立即激活")
+            }
+
+            if (!editing && hasCreds) {
+                XunfeiCredSummary(
+                    appId = savedAppId,
+                    apiKey = savedApiKey,
+                    apiSecret = savedApiSecret,
+                    onEdit = { editing = true }
+                )
+            } else {
+                XunfeiCredEditor(
+                    initialAppId = savedAppId,
+                    initialApiKey = savedApiKey,
+                    initialApiSecret = savedApiSecret,
+                    canCancel = hasCreds,
+                    onSave = { appId, apiKey, apiSecret ->
+                        vm.saveXunfeiSharedKeys(appId, apiKey, apiSecret)
+                        reloadTrigger++
+                        editing = false
+                    },
+                    onCancel = { editing = false }
+                )
+            }
+        }
+    }
+}
+
+/** 折叠态: 一行掩码摘要 + 编辑按钮。 */
+@Composable
+private fun XunfeiCredSummary(
+    appId: String,
+    apiKey: String,
+    apiSecret: String,
+    onEdit: () -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Filled.Lock,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "AppID  ${maskMiddle(appId)}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                "APIKey  ${maskMiddle(apiKey)}",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "APISecret  ${maskMiddle(apiSecret)}",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        OutlinedButton(onClick = onEdit) {
+            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("编辑")
+        }
+    }
+}
+
+/** 编辑态: 三个输入框 + 保存按钮 (可选取消)。 */
+@Composable
+private fun XunfeiCredEditor(
+    initialAppId: String,
+    initialApiKey: String,
+    initialApiSecret: String,
+    canCancel: Boolean,
+    onSave: (appId: String, apiKey: String, apiSecret: String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var appId by remember { mutableStateOf(initialAppId) }
+    var apiKey by remember { mutableStateOf(initialApiKey) }
+    var apiSecret by remember { mutableStateOf(initialApiSecret) }
+    var savedSnapshot by remember {
+        mutableStateOf(Triple(initialAppId, initialApiKey, initialApiSecret))
+    }
+    val dirty = Triple(appId, apiKey, apiSecret) != savedSnapshot
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "APISecret 是一长串十六进制,务必整段复制不要漏字符。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline
+        )
+        OutlinedTextField(
+            value = appId,
+            onValueChange = { appId = it.trim() },
+            label = { Text("AppID") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it.trim() },
+            label = { Text("APIKey") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = apiSecret,
+            onValueChange = { apiSecret = it.trim() },
+            label = { Text("APISecret") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        KeyFormSaveBar(
+            dirty = dirty,
+            canCancel = canCancel,
+            onSave = {
+                savedSnapshot = Triple(appId, apiKey, apiSecret)
+                onSave(appId, apiKey, apiSecret)
+            },
+            onCancel = onCancel
+        )
+    }
+}
+
+/**
+ * 讯飞超拟人独有的 Resource ID 卡片。
+ * 沿用「折叠 / 编辑」的同款交互, 让两张卡片在视觉上一致。
+ */
+@Composable
+private fun XunfeiSuperResourceIdCard(vm: TtsSettingsViewModel) {
+    var reloadTrigger by remember { mutableStateOf(0) }
+    val savedResourceId = remember(reloadTrigger) { vm.getStoredKey("resource_id") ?: "" }
+    val has = savedResourceId.isNotBlank()
+    var editing by remember { mutableStateOf(!has) }
+
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("超拟人 Resource ID", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "控制台「超拟人合成 API」一栏 URL 末段,形如 mcd9m97e6。这是超拟人独有的额外授权字段。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline
+            )
+
+            if (!editing && has) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.Lock,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Resource ID  ${maskMiddle(savedResourceId)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedButton(onClick = { editing = true }) {
+                        Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("编辑")
                     }
                 }
-            }
-            if (state is XunfeiOfflineAuthUiState.Failed) {
-                Text(
-                    state.reason,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
+            } else {
+                var value by remember { mutableStateOf(savedResourceId) }
+                var snapshot by remember { mutableStateOf(savedResourceId) }
+                val dirty = value != snapshot
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it.trim() },
+                    label = { Text("Resource ID") },
+                    placeholder = { Text("如 mcd9m97e6") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
+                KeyFormSaveBar(
+                    dirty = dirty,
+                    canCancel = has,
+                    onSave = {
+                        // 沿用 saveKeys (按 active engineId 命名空间),
+                        // 此时 active 一定是 xunfei_super, 与现有读取路径一致。
+                        vm.saveKeys(mapOf("resource_id" to value))
+                        snapshot = value
+                        reloadTrigger++
+                        editing = false
+                    },
+                    onCancel = { editing = false }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 把一个凭据字符串脱敏成 "前 4 位 + 星号 + 后 4 位" 形式;
+ * 太短时显示全星号, 避免泄露片段。
+ *  - "abcdef1234567890" → "abcd********7890"
+ *  - "abc"              → "***"
+ */
+private fun maskMiddle(value: String): String {
+    val v = value.trim()
+    if (v.length <= 8) return "*".repeat(v.length.coerceAtLeast(3))
+    val head = v.take(4)
+    val tail = v.takeLast(4)
+    val starCount = (v.length - 8).coerceAtMost(12)
+    return "$head${"*".repeat(starCount)}$tail"
+}
+
+/**
+ * matcha 离线神经 TTS 模型管理卡片。
+ *
+ * 四种状态对应不同 UI:
+ *  - Missing : 显示「下载离线模型 (~90MB)」按钮 + 来源说明
+ *  - Downloading : 显示线性进度条 + 当前正在下载的文件名 + 百分比
+ *  - Ready : 显示 ✓ 已就绪 + 「删除模型」按钮
+ *  - Failed : 显示错误信息 + 「重试」按钮
+ *
+ * 注意: 下载跑在 ViewModel 协程上, 退出设置页后仍会继续 (Singleton 持有状态),
+ * 用户回到设置页能看到当前进度, 不会"白下"。
+ */
+@Composable
+private fun MatchaModelCard(vm: TtsSettingsViewModel) {
+    val state by vm.matchaState.collectAsState()
+    val progress by vm.matchaProgress.collectAsState()
+    val currentFile by vm.matchaCurrentFile.collectAsState()
+    val hasBundled = remember { vm.matchaHasBundledAssets() }
+
+    // 按钮文案: 有预装资源就显示"从预装安装", 否则就是"在线下载"
+    val installAction: () -> Unit = { vm.downloadMatchaModel() }
+    val installLabel = if (hasBundled) "立即安装 (~100MB)" else "下载离线模型 (~100MB)"
+    val retryLabel = if (hasBundled) "重新安装" else "重试下载"
+    val descLines = if (hasBundled) {
+        "APK 已预装完整模型文件,首次启用只是把它们解压到 App 目录,耗时几秒,无需联网。"
+    } else {
+        "APK 内未预装模型,需联网下载。下载源走 HuggingFace 国内镜像 (hf-mirror.com),国内一般 1-3 分钟。"
+    }
+
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("离线神经 TTS 模型", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "matcha-icefall-zh-baker (标贝中文女声),开源、完全离线、无配额限制。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+
+            when (state) {
+                MatchaModelManager.State.Missing -> {
+                    Button(
+                        onClick = installAction,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(installLabel)
+                    }
+                    Text(
+                        descLines,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+                MatchaModelManager.State.Installing,
+                MatchaModelManager.State.Downloading -> {
+                    val stageText = if (state == MatchaModelManager.State.Installing) {
+                        "正在安装预装模型 ${(progress * 100).toInt()}%"
+                    } else {
+                        "正在下载模型 ${(progress * 100).toInt()}%"
+                    }
+                    Text(
+                        stageText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (currentFile.isNotBlank()) {
+                        Text(
+                            "当前文件: $currentFile",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    Text(
+                        "可以离开此页面继续阅读,任务在后台进行。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+                MatchaModelManager.State.Ready -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "✓ 模型已就绪,可离线使用",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(onClick = { vm.deleteMatchaModel() }) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("删除")
+                        }
+                    }
+                }
+                MatchaModelManager.State.Failed -> {
+                    val err = vm.matchaErrorMessage ?: "未知错误"
+                    Text(
+                        err,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Button(
+                        onClick = installAction,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(retryLabel)
+                    }
+                }
             }
         }
     }
@@ -884,11 +1039,16 @@ private fun OpenAiKeyForm(vm: TtsSettingsViewModel) {
  *  - dirty=false 时按钮置灰,左侧显示"已保存"
  *  - dirty=true 时按钮高亮,左侧显示"有未保存的修改"
  *  - 点击保存后,2 秒内左侧短暂显示"已保存 ✓"
+ *
+ * 当 [canCancel] 为 true 时,左侧额外展示一个"取消"按钮 —— 用于"已配置后再编辑"场景,
+ * 让用户可以放弃本次修改回到折叠态。
  */
 @Composable
 private fun KeyFormSaveBar(
     dirty: Boolean,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    canCancel: Boolean = false,
+    onCancel: () -> Unit = {}
 ) {
     var justSaved by remember { mutableStateOf(false) }
     LaunchedEffect(justSaved) {
@@ -934,6 +1094,10 @@ private fun KeyFormSaveBar(
             }
         }
         Spacer(Modifier.weight(1f))
+        if (canCancel) {
+            TextButton(onClick = onCancel) { Text("取消") }
+            Spacer(Modifier.width(4.dp))
+        }
         Button(
             onClick = {
                 onSave()

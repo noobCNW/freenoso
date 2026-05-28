@@ -9,13 +9,14 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.xs.reader.data.prefs.ReadingPrefs
 import com.xs.reader.data.prefs.ReadingPrefsRepository
+import com.xs.reader.tts.MatchaModelManager
+import com.xs.reader.tts.MatchaTtsEngine
 import com.xs.reader.tts.SecureKeyStore
 import com.xs.reader.tts.TtsAudio
 import com.xs.reader.tts.TtsEngine
 import com.xs.reader.tts.TtsEngineRegistry
 import com.xs.reader.tts.TtsRequest
 import com.xs.reader.tts.TtsVoice
-import com.xs.reader.tts.XunfeiOfflineSdkManager
 import com.xs.reader.tts.XunfeiSuperTtsEngine
 import com.xs.reader.tts.XunfeiVoicePreset
 import kotlinx.coroutines.flow.map
@@ -52,21 +53,13 @@ sealed class TtsTestState {
     data class Error(val message: String) : TtsTestState()
 }
 
-/** 讯飞离线 SDK 在设置页的鉴权状态视图模型。 */
-sealed class XunfeiOfflineAuthUiState {
-    data object Idle : XunfeiOfflineAuthUiState()
-    data object Activating : XunfeiOfflineAuthUiState()
-    data object Ready : XunfeiOfflineAuthUiState()
-    data class Failed(val reason: String) : XunfeiOfflineAuthUiState()
-}
-
 @HiltViewModel
 class TtsSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val prefsRepo: ReadingPrefsRepository,
     private val registry: TtsEngineRegistry,
     private val keyStore: SecureKeyStore,
-    private val xunfeiOfflineSdk: XunfeiOfflineSdkManager
+    private val matchaModelManager: MatchaModelManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TtsSettingsState(engines = registry.all))
@@ -75,18 +68,11 @@ class TtsSettingsViewModel @Inject constructor(
     private val _testState = MutableStateFlow<TtsTestState>(TtsTestState.Idle)
     val testState: StateFlow<TtsTestState> = _testState.asStateFlow()
 
-    private val _offlineAuthState = MutableStateFlow<XunfeiOfflineAuthUiState>(
-        // 把 SdkManager 的当前状态映射到 UI 上,设置页第一次打开时就能反映出"已激活"
-        when (xunfeiOfflineSdk.state) {
-            XunfeiOfflineSdkManager.State.Ready -> XunfeiOfflineAuthUiState.Ready
-            XunfeiOfflineSdkManager.State.Initializing -> XunfeiOfflineAuthUiState.Activating
-            XunfeiOfflineSdkManager.State.AuthFailed,
-            XunfeiOfflineSdkManager.State.MissingKeys ->
-                XunfeiOfflineAuthUiState.Failed(xunfeiOfflineSdk.lastErrorMessage ?: "未激活")
-            XunfeiOfflineSdkManager.State.Uninitialized -> XunfeiOfflineAuthUiState.Idle
-        }
-    )
-    val offlineAuthState: StateFlow<XunfeiOfflineAuthUiState> = _offlineAuthState.asStateFlow()
+    // matcha 模型状态直接转发给 UI; 单一来源, 切 engine 不影响。
+    val matchaState: StateFlow<MatchaModelManager.State> = matchaModelManager.state
+    val matchaProgress: StateFlow<Float> = matchaModelManager.progress
+    val matchaCurrentFile: StateFlow<String> = matchaModelManager.currentFile
+    val matchaErrorMessage: String? get() = matchaModelManager.lastErrorMessage
 
     val prefs: StateFlow<ReadingPrefs> = prefsRepo.flow.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), ReadingPrefs()
@@ -101,6 +87,12 @@ class TtsSettingsViewModel @Inject constructor(
     private var testJob: Job? = null
 
     init {
+        // 历史包袱迁移: 0.x 版本曾把 AppID/APIKey/APISecret 分别存在
+        // xunfei / xunfei_super / xunfei_offline 三个命名空间里, 0.2.0 起统一到
+        // XUNFEI_SHARED_NS。xunfei_offline 引擎已被移除, 但这里保留迁移逻辑用来
+        // 一次性合并任何遗留键到共享命名空间, 这样从老版本升级上来的用户不用重填。
+        keyStore.migrateLegacyXunfeiKeys()
+
         viewModelScope.launch {
             prefsRepo.flow.collect { p ->
                 // 旧版本可能存了已废弃的 "edge" / "openai" 引擎 id, 回退到 system
@@ -150,15 +142,22 @@ class TtsSettingsViewModel @Inject constructor(
     fun setPitch(v: Float) = viewModelScope.launch { prefsRepo.setTtsPitch(v) }
 
     /**
-     * 主动触发讯飞离线 SDK 鉴权激活。设置页"立即激活"按钮调用。
+     * 触发 matcha 模型就位。会优先用 APK 内预装资源(立即可用),
+     * APK 不带预装时退化到走 hf-mirror 在线下载。
+     * 状态 / 进度通过 [matchaState] / [matchaProgress] 推送。
      */
-    fun activateXunfeiOffline() = viewModelScope.launch {
-        _offlineAuthState.update { XunfeiOfflineAuthUiState.Activating }
-        val ok = withContext(Dispatchers.IO) { xunfeiOfflineSdk.ensureReady() }
-        _offlineAuthState.update {
-            if (ok) XunfeiOfflineAuthUiState.Ready
-            else XunfeiOfflineAuthUiState.Failed(xunfeiOfflineSdk.lastErrorMessage ?: "鉴权失败")
-        }
+    fun downloadMatchaModel() = viewModelScope.launch {
+        withContext(Dispatchers.IO) { matchaModelManager.ensureReady() }
+    }
+
+    /** UI 用来决定按钮文案("立即安装" vs "下载离线模型")。 */
+    fun matchaHasBundledAssets(): Boolean = matchaModelManager.hasBundledAssets()
+
+    /** 删除本地 matcha 模型,释放 ~100MB 磁盘空间。 */
+    fun deleteMatchaModel() = viewModelScope.launch {
+        // 先停掉可能持有 OfflineTts 的引擎 (释放原模型句柄), 再删文件
+        runCatching { registry.byId(MatchaTtsEngine.ENGINE_ID).close() }
+        withContext(Dispatchers.IO) { matchaModelManager.deleteModel() }
     }
 
     /**
@@ -211,6 +210,34 @@ class TtsSettingsViewModel @Inject constructor(
     fun saveKeys(values: Map<String, String>) {
         val engineId = _state.value.activeEngineId
         values.forEach { (k, v) -> keyStore.put(engineId, k, v.takeIf { it.isNotBlank() }) }
+    }
+
+    /**
+     * 读取讯飞共享凭据 (AppID / APIKey / APISecret),
+     * 三个讯飞引擎都共用,见 [SecureKeyStore.XUNFEI_SHARED_NS]。
+     */
+    fun getXunfeiSharedKey(key: String): String? =
+        keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, key)
+
+    /**
+     * 是否已经填过讯飞共享凭据 (AppID/APIKey/APISecret 三个都非空)。
+     * UI 用它决定凭据卡片显示"输入态"还是"已保存折叠态"。
+     */
+    fun hasXunfeiSharedCreds(): Boolean {
+        val a = getXunfeiSharedKey("app_id")
+        val k = getXunfeiSharedKey("api_key")
+        val s = getXunfeiSharedKey("api_secret")
+        return !a.isNullOrBlank() && !k.isNullOrBlank() && !s.isNullOrBlank()
+    }
+
+    /**
+     * 一次性保存讯飞共享凭据。会同时影响三个讯飞引擎,
+     * 因此 UI 上必须用清晰的"讯飞凭据"措辞,不要再叫"讯飞普通版凭据"等。
+     */
+    fun saveXunfeiSharedKeys(appId: String, apiKey: String, apiSecret: String) {
+        keyStore.put(SecureKeyStore.XUNFEI_SHARED_NS, "app_id", appId.takeIf { it.isNotBlank() })
+        keyStore.put(SecureKeyStore.XUNFEI_SHARED_NS, "api_key", apiKey.takeIf { it.isNotBlank() })
+        keyStore.put(SecureKeyStore.XUNFEI_SHARED_NS, "api_secret", apiSecret.takeIf { it.isNotBlank() })
     }
 
     /**

@@ -8,9 +8,9 @@ class TtsEngineRegistry @Inject constructor(
     private val system: SystemTtsEngine,
     private val xunfei: XunfeiTtsEngine,
     private val xunfeiSuper: XunfeiSuperTtsEngine,
-    private val xunfeiOffline: XunfeiOfflineTtsEngine
+    private val matcha: MatchaTtsEngine
 ) {
-    val all: List<TtsEngine> = listOf(system, xunfei, xunfeiSuper, xunfeiOffline)
+    val all: List<TtsEngine> = listOf(system, xunfei, xunfeiSuper, matcha)
 
     fun byId(id: String): TtsEngine = all.firstOrNull { it.id == id } ?: system
 }

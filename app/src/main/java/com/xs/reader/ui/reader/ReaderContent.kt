@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -545,6 +546,33 @@ private fun ReflowReader(
             )
         }
 
+        // 自动阅读时常驻的浮动调速条:不依赖 overlay,
+        // overlay 显示时上移到 BottomAppBar 之上, 隐藏时贴近底部安全区,
+        // 用户随时可以加减速 / 直接拖 Slider / 一键停止。
+        AnimatedVisibility(
+            visible = autoReading,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = if (showOverlay) 88.dp else 12.dp),
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut()
+        ) {
+            AutoReadSpeedBar(
+                speed = prefs.autoReadSpeed,
+                onSpeedChange = { vm.setAutoReadSpeed(it) },
+                onMinus = {
+                    val next = (prefs.autoReadSpeed - 1f).coerceIn(1f, 10f)
+                    if (next != prefs.autoReadSpeed) vm.setAutoReadSpeed(next)
+                },
+                onPlus = {
+                    val next = (prefs.autoReadSpeed + 1f).coerceIn(1f, 10f)
+                    if (next != prefs.autoReadSpeed) vm.setAutoReadSpeed(next)
+                },
+                onStop = { vm.stopAutoReading() }
+            )
+        }
+
         AnimatedVisibility(
             visible = showOverlay,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -583,6 +611,85 @@ private fun ReflowReader(
                     text = "阅读设置",
                     onClick = onOpenSettings,
                     modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 自动阅读时浮在屏幕底部的调速条:点击/拖动都不会穿透到正文区(避免误触翻页或
+ * 切换 overlay), 提供 −/+ 微调按钮、Slider 拖动以及一键"停止"。
+ */
+@Composable
+private fun AutoReadSpeedBar(
+    speed: Float,
+    onSpeedChange: (Float) -> Unit,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    onStop: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { /* 消费 tap, 避免穿透到 ReflowReader 翻页 */ })
+            },
+        shape = MaterialTheme.shapes.large,
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "速度",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.width(4.dp))
+            TextButton(
+                onClick = onMinus,
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.size(40.dp)
+            ) {
+                Text("−", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+            Slider(
+                value = speed,
+                onValueChange = onSpeedChange,
+                valueRange = 1f..10f,
+                steps = 8,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 2.dp)
+            )
+            TextButton(
+                onClick = onPlus,
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.size(40.dp)
+            ) {
+                Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(
+                text = "${speed.toInt()}/10",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.widthIn(min = 36.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            TextButton(
+                onClick = onStop,
+                contentPadding = PaddingValues(horizontal = 8.dp)
+            ) {
+                Text(
+                    "停止",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }

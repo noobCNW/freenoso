@@ -69,9 +69,11 @@ class XunfeiSuperTtsEngine @Inject constructor(
     }
 
     override fun synthesize(request: TtsRequest): Flow<TtsAudio> = callbackFlow {
-        val appId = keyStore.get(id, KEY_APP_ID)
-        val apiKey = keyStore.get(id, KEY_API_KEY)
-        val apiSecret = keyStore.get(id, KEY_API_SECRET)
+        // app_id/api_key/api_secret 从讯飞共享命名空间读 (普通版/超拟人/离线 SDK 同源,
+        // 见 SecureKeyStore.XUNFEI_SHARED_NS); resource_id 仍是超拟人独有, 保留在 id 下。
+        val appId = keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, KEY_APP_ID)
+        val apiKey = keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, KEY_API_KEY)
+        val apiSecret = keyStore.get(SecureKeyStore.XUNFEI_SHARED_NS, KEY_API_SECRET)
         val resourceId = keyStore.get(id, KEY_RESOURCE_ID)?.trim()
         if (appId.isNullOrBlank() || apiKey.isNullOrBlank() || apiSecret.isNullOrBlank()) {
             close(IllegalStateException("讯飞超拟人 TTS 需要在设置中填写 AppID / APIKey / APISecret"))

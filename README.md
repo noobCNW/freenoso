@@ -37,11 +37,11 @@ Android 离线小说阅读器。Kotlin + Jetpack Compose (Material 3) 实现,聚
 
 ### TTS 朗读
 
-- **4 个朗读引擎**(任选其一,APP 内不内置任何凭据,**全部需要用户在 TTS 设置页自行填写自己的讯飞账号 Key 后才能使用**):
+- **4 个朗读引擎**:
   - **系统 TTS**(完全离线,免费,依赖手机自带的中文语音数据)
   - **讯飞普通版**(在线 WebAPI,需要 AppID/APIKey/APISecret;**已内置控制台默认免费开通的 5 个基础发音人** —— 讯飞·小燕 (`x4_xiaoyan`) / 讯飞·小露 (`x4_yezi`) / 讯飞·许久 (`aisjiuxu`) / 讯飞·小婧 (`aisjinger`) / 讯飞·许小宝 (`aisbabyxu`),开箱即用;若你账号还开通了其它特色发音人,可在「我的发音人」追加 vcn,同 vcn 的自定义会覆盖内置)
-  - **讯飞超拟人**(在线 WebAPI,音质比普通版好一档,自带评书 / 电台 / 动漫等高表演力发音人;需要 AppID/APIKey/APISecret + Resource ID,与普通版完全独立;**已内置控制台默认开通的 5 个"聆"系列发音人** —— 聆飞逸 (`x6_lingfeiyi_pro`,男) / 聆小璇 (`x6_lingxiaoxuan_pro`,女) / 聆玉昭 (`x5_lingyuzhao_flow`,女) / 聆小玥 (`x6_lingxiaoyue_pro`,女) / 聆玉言 (`x6_lingyuyan_pro`,女);评书 / 自训等其它发音人同样在「我的超拟人发音人」里追加)
-  - **讯飞离线 (高品质)**:基于讯飞官方 AIKit `XTTS10` SDK 集成,**首次联网激活一次**(消耗 1 个装机额度),之后**完全离线、零字符费用、无并发限制**,内置晓燕(温柔女声)/ 晓峰(沉稳男声)两位发音人
+  - **讯飞超拟人**(在线 WebAPI,音质比普通版好一档,自带评书 / 电台 / 动漫等高表演力发音人;需要 AppID/APIKey/APISecret + Resource ID,与普通版共用同一组凭据;**已内置控制台默认开通的 5 个"聆"系列发音人** —— 聆飞逸 (`x6_lingfeiyi_pro`,男) / 聆小璇 (`x6_lingxiaoxuan_pro`,女) / 聆玉昭 (`x5_lingyuzhao_flow`,女) / 聆小玥 (`x6_lingxiaoyue_pro`,女) / 聆玉言 (`x6_lingyuyan_pro`,女);评书 / 自训等其它发音人同样在「我的超拟人发音人」里追加)
+  - **matcha 离线神经 TTS**(`matcha-icefall-zh-baker`,开源 sherpa-onnx):**无需 API Key,APK 已预装完整模型 (~100MB)**,首次启动自动从 assets 拷贝到 `filesDir`,之后完全离线;内置标贝中文女声,支持语速调节(不支持音调)
 - **评书一键预设**:讯飞超拟人引擎下提供"切到儒雅大叔 + 慢速 + 略压音调 + 韵律强化"的一键应用,听感最接近评书
 - **句子级流式合成 + 边播边合**:`SentenceSplitter` 按标点切句,`TtsController` 提前合成下 1~2 句,`ExoPlayer` 串播
 - **章节自动连播**:一章读完自动续到下一章
@@ -49,7 +49,7 @@ Android 离线小说阅读器。Kotlin + Jetpack Compose (Material 3) 实现,聚
 - **MediaSession 前台 Service**:通知栏 / 锁屏 / 耳机线控
 - **3 次合成失败自动停止**:并通过 `Snackbar` 上报错误,避免静默打转
 - **设置页内试听**:每个引擎有独立的「试听当前音色」卡片,每条音色行还有独立"试听"按钮,免得来回切引擎调音色
-- **`SecureKeyStore`**(`EncryptedSharedPreferences`)加密保存 API Key
+- **`SecureKeyStore`**(`EncryptedSharedPreferences`)加密保存讯飞 API Key(仅在线引擎需要)
 
 ## 工程结构
 
@@ -80,17 +80,25 @@ app/src/main/java/com/xs/reader/
     XunfeiTtsEngine.kt        讯飞普通版 WebAPI /v2/tts (内置基础发音人 + 用户自加合并)
     XunfeiSuperTtsEngine.kt   讯飞超拟人 WebAPI /v1/private/<resource_id> (内置"聆"系列 + 用户自加合并)
     XunfeiVoicePreset.kt      发音人模型 + 内置 vcn 列表 (BUILTIN_XUNFEI / BUILTIN_XUNFEI_SUPER), 用户自定义 JSON 存 DataStore
-    XunfeiOfflineSdkManager.kt 讯飞 AIKit 离线 SDK 全局单例 (鉴权/资源拷贝)
-    XunfeiOfflineTtsEngine.kt  讯飞离线高品质 TTS (XTTS10, ABILITY=e2e44feff)
-    TtsEngineRegistry.kt      引擎注册表
+    MatchaModelManager.kt     matcha 模型生命周期: assets 预装拷贝 / 在线散文件下载兜底 / 完整性校验 / OfflineTtsConfig 构建
+    MatchaTtsEngine.kt        sherpa-onnx 离线神经 TTS (matcha-icefall-zh-baker + hifigan_v2)
+    TtsEngineRegistry.kt      引擎注册表 (system / xunfei / xunfei_super / matcha_zh_baker)
     SentenceSplitter.kt       句子切片
     TtsController.kt          合成 ↔ 播放 编排,失败计数,句子级跟随
     TtsPlaybackService.kt     MediaSession 前台 Service
-    SecureKeyStore.kt         加密保存 API Key
+    SecureKeyStore.kt         加密保存讯飞 API Key (含 legacy xunfei_offline 命名空间迁移)
   di/                  Hilt 模块
 ```
 
-> 离线 TTS 资源:`app/libs/AIKit.aar`(讯飞 AIKit SDK,~7.4 MB)、`app/src/main/assets/iflytek/xtts/*`(5 个 .dat / .irf 音色资源,共 ~35 MB)、`app/build.gradle.kts` 用 `abiFilters arm64-v8a, armeabi-v7a` 过滤掉 SDK 不支持的 x86 架构。
+> **matcha 离线 TTS 资源布局**:
+>
+> | 位置 | 内容 | 大小 |
+> | --- | --- | --- |
+> | `app/libs/sherpa-onnx-1.13.0.aar` | sherpa-onnx + onnxruntime JNI (双 ABI) | ~10 MB |
+> | `app/src/main/assets/matcha-icefall-zh-baker/` | 预装模型 16 个散文件 (声学模型 + jieba 词典 + hifigan 声码器) | ~100 MB |
+> | `filesDir/tts/matcha-icefall-zh-baker/` | 运行时工作目录 (首启从 assets 拷贝) | ~100 MB |
+>
+> `build.gradle.kts` 用 `abiFilters arm64-v8a, armeabi-v7a` 过滤 x86; `androidResources.noCompress` 包含 `onnx / fst / utf8`,避免 assets 被 deflate 压缩导致首启拷贝卡顿。
 
 底部条 5 个文字按钮:**自动阅读 · 语音朗读 · 添加书签 · 章节目录 · 阅读设置**(顶部条只保留「返回」+ 书名,避免太多小图标)。
 
@@ -121,13 +129,15 @@ cd /Users/apple/Desktop/n-obj/xiaoshuo
 ~/.gradle/wrapper/dists/gradle-8.9-bin/90cnw93cvbtalezasaz0blq0a/gradle-8.9/bin/gradle assembleDebug --no-daemon
 ```
 
-产物:`app/build/outputs/apk/debug/app-debug.apk`(约 72 MB,内含 ~35 MB 讯飞离线音色资源 + ~10 MB 双 ABI native .so;`.dat / .irf` 资源必须 `noCompress`,所以无法被 APK 内部 zip 压缩。如不需要离线引擎,可在 `app/build.gradle.kts` 注释掉 AIKit 依赖,APK 会回到 ~25 MB)
+产物:`app/build/outputs/apk/debug/app-debug.apk`(约 **171 MB**,含 ~100 MB matcha 预装模型 + ~10 MB sherpa-onnx native .so;`onnx / fst / utf8` 已配 `noCompress`,APK 内以 stored 模式存放)
 
 直接装到连着的设备:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+> **Gradle Wrapper 排坑**:若 `./gradlew` 报 `NoClassDefFoundError: org/gradle/wrapper/IDownload`,说明 `gradle/wrapper/gradle-wrapper.jar` 损坏,可从本机 Gradle 8.9 缓存里复制一份替换,或直接用上面「本机 Gradle 8.9」路径。
 
 ## TTS 配置说明
 

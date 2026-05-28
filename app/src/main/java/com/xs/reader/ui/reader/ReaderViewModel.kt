@@ -260,6 +260,11 @@ class ReaderViewModel @Inject constructor(
         if (_autoReading.value) _autoReading.value = false
     }
 
+    /** 仅供阅读界面浮动调速条调用,持久化到 prefs,LaunchedEffect 会自动按新速度重启。 */
+    fun setAutoReadSpeed(v: Float) {
+        viewModelScope.launch { prefsRepo.setAutoReadSpeed(v) }
+    }
+
     fun toggleTts() {
         val s = _state.value
         val book = s.book ?: return

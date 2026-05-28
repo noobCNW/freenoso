@@ -20,8 +20,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        // 讯飞 AIKit 离线 SDK 只发了 arm64-v8a / armeabi-v7a 的 .so;
-        // x86/x86_64 上加载会崩,直接在打包阶段过滤掉。
+        // sherpa-onnx 只发了 arm64-v8a / armeabi-v7a / x86_64 的 .so; 真机覆盖前两者就够,
+        // 模拟器一般人用 arm64 镜像。把 x86 系列从 APK 中剔除, 避免无意义增大 APK。
         ndk {
             abiFilters += setOf("arm64-v8a", "armeabi-v7a")
         }
@@ -52,13 +52,6 @@ android {
         compose = true
         buildConfig = true
     }
-    // 讯飞离线 SDK 的音色资源 (.dat / .irf) 必须以"未压缩"形式打到 APK,
-    // 否则 SDK 内部用 AssetManager.openFd / FileInputStream 读时会抛
-    // "This file can not be opened as a file descriptor; it is probably compressed"。
-    // 同时也让我们 copyAssetsIfNeeded() 里的 openFd 探活逻辑可用。
-    androidResources {
-        noCompress += listOf("dat", "irf", "jet")
-    }
     packaging {
         resources {
             excludes += setOf(
@@ -70,6 +63,15 @@ android {
                 "/META-INF/NOTICE.txt"
             )
         }
+    }
+
+    // matcha-icefall-zh-baker 预装资源(~100MB,16 个文件)。
+    // 不允许 aapt 把 ONNX/字典文件压成 deflate, 否则:
+    //  1) 首启拷贝时 AssetManager.open() 要现场解压, 大模型直接卡 10+ 秒;
+    //  2) AAB / split APK 上传校验会因压缩文件 CRC 失败炸开;
+    //  3) 节省安装包体积的意义不大: ONNX 已是接近随机的浮点权重, deflate 压缩率 < 5%。
+    androidResources {
+        noCompress += listOf("onnx", "fst", "utf8")
     }
 }
 
@@ -122,6 +124,8 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    // 讯飞 AIKit 离线 TTS SDK (libs/AIKit.aar)
-    implementation(files("libs/AIKit.aar"))
+    // sherpa-onnx 离线神经 TTS 运行时 (AAR 含 onnxruntime + jni)。
+    // 1.13.0 体积约 57MB,因带 4 个 ABI 的 onnxruntime .so;
+    // 通过 abiFilters 已过滤掉 x86/x86_64,实际打包仅保留 arm64-v8a + armeabi-v7a。
+    implementation(files("libs/sherpa-onnx-1.13.0.aar"))
 }
